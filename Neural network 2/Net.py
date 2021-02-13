@@ -1,3 +1,4 @@
+from numpy.lib.histograms import histogramdd
 from sklearn.datasets import fetch_openml
 from os import error
 import numpy as np
@@ -62,8 +63,24 @@ class Network(object):
     def backpropogate(self, inputs, targets, learningRate, epochs):
         self.forward(inputs)
         for epoch in range(epochs):
-            error = 2 * (output - y_train) / output.shape[0] * self.output_activation_der(self.outputs.output)
-            dW
+            #output
+            error = 2 * (self.output - y_train) / self.output.shape[0] * self.output_activation_der(self.outputs.output)
+            dW = np.outer(error, self.hiddenLayers[-1].activatedOutput)
+            weights = self.outputs.weights
+            self.outputs.weights -= dW * learningRate
+            
+            #hidden layers
+            for i in range(len(self.hiddenLayers), 1):
+                error = np.dot(weights.T, error) * self.activation_der(self.hiddenLayers[i].output)
+                dW = np.outer(error, self.hiddenLayers[i - 1].activatedOutput)
+                weights = self.hiddenLayers[i].weights
+                self.hiddenLayers[i].weights -= dW * learningRate
+            
+            #first hidden layer
+            error = np.dot(weights.T, error) * self.activation_der(self.hiddenLayers[i].output)
+            dW = np.outer(error, inputs)
+            weights = self.hiddenLayers[0].weights
+            self.hiddenLayers[0].weights -= dW * learningRate
             
             self.forward(inputs)
             print("Epoch: " + str(epoch) + " Cost: " + str(self.Loss(targets, self.output)))
