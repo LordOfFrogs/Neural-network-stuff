@@ -1,29 +1,18 @@
-from numpy.lib.histograms import histogramdd
+from keras.utils.np_utils import to_categorical
 from sklearn.datasets import fetch_openml
+from sklearn.model_selection import train_test_split
 from os import error
 import numpy as np
 import matplotlib.pyplot as plt
 
 #fetch data
 mnist = fetch_openml('mnist_784', version=1)
-X, y = np.array(mnist["data"]), np.array(mnist["target"])
+x, y = np.array(mnist["data"]), np.array(mnist["target"])
 
-X /= 255 #normalize
-digits = 10
-examples = y.shape[0]
-y = y.reshape(1, examples)
+x = (x/255).astype('float32')
+y = to_categorical(y)
 
-Y_new = np.eye(digits)[y.astype('int32')]
-Y_new = Y_new.T.reshape(digits, examples)
-
-m = 60000 #how many are training vs test
-m_test = X.shape[0] - m
-
-X_train, X_test = X[:m].T, X[m:]
-y_train, y_test = Y_new[:,:m], Y_new[:,m:].T
-
-shuffle_index = np.random.permutation(m)
-X_train, y_train = X_train[:, shuffle_index].T, y_train[:, shuffle_index].T
+x_train, x_val, y_train, y_val = train_test_split(x, y, test_size=0.15, random_state=42)
 
 '''np.random.seed(42)
 
@@ -56,8 +45,10 @@ class Network(object):
 
     def forward(self, inputs):
         # forward feed each layer
-        self.hiddenLayer.forward(inputs)
-        self.outputs.forward(self.hiddenLayer.activatedOutput)
+        self.hiddenLayers[0].forward(inputs)
+        for i in range(1, len(self.hiddenLayers)):
+            self.hiddenLayers[i].forward(self.hiddenLayers[i-1].activatedOutput)
+        self.outputs.forward(self.hiddenLayers[-1].activatedOutput)
         self.output = self.outputs.activatedOutput
 
     def backpropogate(self, inputs, targets, learningRate, epochs):
@@ -65,6 +56,8 @@ class Network(object):
         for epoch in range(epochs):
             #output
             error = 2 * (self.output - y_train) / self.output.shape[0] * self.output_activation_der(self.outputs.output)
+            print(error.shape)
+            print(self.hiddenLayers[-1].activatedOutput.shape)
             dW = np.outer(error, self.hiddenLayers[-1].activatedOutput)
             weights = self.outputs.weights
             self.outputs.weights -= dW * learningRate
@@ -90,13 +83,13 @@ class Network(object):
 class Layer(object):
     def __init__(self, n_inputs, n_neurons, activation):
         # init weights as random and biases as 0s
-        self.weights = 0.1*np.random.randn(n_inputs, n_neurons)
+        self.weights = 0.1*np.random.randn(n_neurons, n_inputs)
         self.biases = np.zeros((1, n_neurons))
         self.activation = activation
 
     def forward(self, inputs):
         # run layer
-        self.output = np.dot(inputs, self.weights) + self.biases
+        self.output = np.dot(self.weights, inputs) + self.biases
         self.activatedOutput = self.activation(self.output)
 
 
@@ -121,7 +114,6 @@ def CrossEntropy(y, yhat):
 
 def MAE(y, yhat):
     return np.mean(np.abs(y - yhat))
-
 
 net = Network(X_train.shape[1], 10, 2, 10, Sigmoid, Sigmoid_der, Softmax, Softmax_der, MAE)
 
