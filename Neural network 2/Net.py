@@ -6,13 +6,14 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 #fetch data
-mnist = fetch_openml('mnist_784', version=1)
-x, y = np.array(mnist["data"]), np.array(mnist["target"])
+x, y = fetch_openml('mnist_784', version=1, return_X_y=True)
 
 x = (x/255).astype('float32')
 y = to_categorical(y)
 
-x_train, x_val, y_train, y_val = train_test_split(x, y, test_size=0.15, random_state=42)
+X_train, X_test, y_train, y_test = train_test_split(x, y, test_size=0.15, random_state=42)
+X_train = X_train.T
+X_test = X_test.T
 
 '''np.random.seed(42)
 
@@ -89,7 +90,7 @@ class Layer(object):
 
     def forward(self, inputs):
         # run layer
-        self.output = np.dot(self.weights, inputs) + self.biases
+        self.output = np.dot(self.weights, inputs).T + self.biases
         self.activatedOutput = self.activation(self.output)
 
 
@@ -115,15 +116,15 @@ def CrossEntropy(y, yhat):
 def MAE(y, yhat):
     return np.mean(np.abs(y - yhat))
 
-net = Network(X_train.shape[1], 10, 2, 10, Sigmoid, Sigmoid_der, Softmax, Softmax_der, MAE)
-
-net.backpropogate(X_train, y_train, 0.1, 1000)
+net = Network(X_train.shape[0], 10, 2, 10, Sigmoid, Sigmoid_der, Softmax, Softmax_der, MAE)
+net.forward(X_train)
+#net.backpropogate(X_train, y_train, 0.1, 1000)
 
 losses = []
 net.forward(X_test)
 print(np.mean(net.Loss(y_test, net.output)))
 
-image = X_test[np.random.randint(0, m_test)]
+image = X_test[np.random.randint(0, X_test.shape[0])]
 pixels = np.reshape(image, (28, 28))
 plt.imshow(pixels, cmap='gray')
 net.forward(np.array([image]))
