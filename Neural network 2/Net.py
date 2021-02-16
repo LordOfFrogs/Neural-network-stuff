@@ -1,4 +1,4 @@
-from keras.utils.np_utils import to_categorical
+import os
 from sklearn.datasets import fetch_openml
 from sklearn.model_selection import train_test_split
 from os import error
@@ -6,14 +6,17 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 #fetch data
-x, y = fetch_openml('mnist_784', version=1, return_X_y=True)
+x, y_labels = fetch_openml('mnist_784', version=1, return_X_y=True)
 
 x = (x/255).astype('float32')
-y = to_categorical(y)
+y = np.zeros((y_labels.shape[0], 10))
+
+for i in range(y_labels.shape[0]):
+    y[i][int(y_labels[i])] = 1
 
 X_train, X_test, y_train, y_test = train_test_split(x, y, test_size=0.15, random_state=42)
-X_train = X_train.T
-X_test = X_test.T
+'''X_train = X_train.T
+X_test = X_test.T'''
 
 '''np.random.seed(42)
 
@@ -30,68 +33,90 @@ for i in range(2100):
     one_hot_labels[i][labels[i]] = 1'''
 
 class Network(object):
-    def __init__(self, n_inputs, n_hiddens, n_hiddenLayers, n_outputs, activation, activation_der, output_activation, outactivation_der, Loss):
+    def __init__(self, activation, activation_der, output_activation, output_activation_der, Loss, Loss_der):
         self.Loss = Loss
+        self.Loss_der = Loss_der
         self.activation = activation
         self.output_activation = output_activation
         self.activation_der = activation_der
-        self.output_activation_der = outactivation_der
+        self.output_activation_der = output_activation_der
         
         # initialize layers
-        self.hiddenLayers = []
-        for i in range(n_hiddenLayers - 1):
-            self.hiddenLayers.append(Layer(n_hiddens, n_hiddens, activation))
-        self.hiddenLayers.insert(0, Layer(n_inputs, n_hiddens, activation))
-        self.outputs = Layer(n_hiddens, n_outputs, output_activation)
-
+        self.layers = []
+        
+    def add(self, layer):
+        self.layers.append(layer)
+    
     def forward(self, inputs):
-        # forward feed each layer
-        self.hiddenLayers[0].forward(inputs)
-        for i in range(1, len(self.hiddenLayers)):
-            self.hiddenLayers[i].forward(self.hiddenLayers[i-1].activatedOutput)
-        self.outputs.forward(self.hiddenLayers[-1].activatedOutput)
-        self.output = self.outputs.activatedOutput
+        # sample dimension first
+        samples = len(inputs)
+        result = []
 
-    def backpropogate(self, inputs, targets, learningRate, epochs):
-        self.forward(inputs)
-        for epoch in range(epochs):
-            #output
-            error = 2 * (self.output - y_train) / self.output.shape[0] * self.output_activation_der(self.outputs.output)
-            print(error.shape)
-            print(self.hiddenLayers[-1].activatedOutput.shape)
-            dW = np.outer(error, self.hiddenLayers[-1].activatedOutput)
-            weights = self.outputs.weights
-            self.outputs.weights -= dW * learningRate
-            
-            #hidden layers
-            for i in range(len(self.hiddenLayers), 1):
-                error = np.dot(weights.T, error) * self.activation_der(self.hiddenLayers[i].output)
-                dW = np.outer(error, self.hiddenLayers[i - 1].activatedOutput)
-                weights = self.hiddenLayers[i].weights
-                self.hiddenLayers[i].weights -= dW * learningRate
-            
-            #first hidden layer
-            error = np.dot(weights.T, error) * self.activation_der(self.hiddenLayers[i].output)
-            dW = np.outer(error, inputs)
-            weights = self.hiddenLayers[0].weights
-            self.hiddenLayers[0].weights -= dW * learningRate
-            
-            self.forward(inputs)
-            print("Epoch: " + str(epoch) + " Cost: " + str(self.Loss(targets, self.output)))
+        # run network over all samples
+        for i in range(samples):
+            # forward propagation
+            output = inputs[i]
+            for layer in self.layers:
+                output = layer.forward_propagation(output)
+            result.append(output)
+
+        return result
+
+    def backpropogate(self, inputs, targets, learning_rate, epochs):
+        # sample dimension first
+        samples = len(inputs)
+
+        # training loop
+        for i in range(epochs):
+            err = 0
+            for j in range(samples):
+                # forward propagation
+                output = inputs[j]
+                for layer in self.layers:
+                    output = layer.forward_propagation(output)
+
+                # compute loss (for display purpose only)
+                err += self.Loss(targets[j], output)
+
+                # backward propagation
+                error = self.Loss_der(targets[j], output)
+                for layer in reversed(self.layers):
+                    error = layer.backward_propagation(error, learning_rate)
+
+            # calculate average error on all samples
+            err /= samples
+            print('epoch %d/%d   error=%f' % (i+1, epochs, err))
                 
-
-
-class Layer(object):
-    def __init__(self, n_inputs, n_neurons, activation):
-        # init weights as random and biases as 0s
-        self.weights = 0.1*np.random.randn(n_neurons, n_inputs)
-        self.biases = np.zeros((1, n_neurons))
-        self.activation = activation
+class FCLayer(object):
+    def __init__(self, n_inputs, n_neurons):
+        self.weights = 0.1*np.random.randn(n_inputs, n_neurons)
+        self.biases = np.random.randn(1, n_neurons)
 
     def forward(self, inputs):
-        # run layer
-        self.output = np.dot(self.weights, inputs).T + self.biases
-        self.activatedOutput = self.activation(self.output)
+        self.input = inputs
+        self.output = np.dot(self.input, self.weights) + self.biases
+        return self.output
+    
+    def backpropogate(self, output_error, learning_rate):
+        input_error = np.dot(output_error, self.weights.T)
+        weights_error = np.dot(self.input.T, output_error)
+
+        self.weights -= learning_rate * weights_error
+        self.bias -= learning_rate * output_error
+        return input_error
+    
+class ActivationLayer(object):
+    def __init__(self, activation, activation_der):
+        self.activation = activation
+        self.activation_der = activation_der
+
+    def forward(self, inputs):
+        self.input = inputs
+        self.output = self.activation(self.input)
+        return self.output
+    
+    def backpropogate(self, output_error):
+        return self.activation_prime(self.input) * output_error
 
 
 # activations 
@@ -113,20 +138,24 @@ def CrossEntropy(y, yhat):
 
     return L
 
-def MAE(y, yhat):
+def MSE(y, yhat):
     return np.mean(np.abs(y - yhat))
 
-net = Network(X_train.shape[0], 10, 2, 10, Sigmoid, Sigmoid_der, Softmax, Softmax_der, MAE)
-net.forward(X_train)
-#net.backpropogate(X_train, y_train, 0.1, 1000)
+def MSE_der(y, yhat):
+    return 2*(yhat-y)/y.size
 
-losses = []
-net.forward(X_test)
-print(np.mean(net.Loss(y_test, net.output)))
+net = Network(Sigmoid, Sigmoid_der, Softmax, Softmax_der, MSE, MSE_der)
+net.add(FCLayer(28*28, 15))
+net.add(ActivationLayer(Sigmoid, Sigmoid_der))
+net.add(FCLayer(15, 15))
+net.add(ActivationLayer(Sigmoid, Sigmoid_der))
+net.add(FCLayer(15, 10))
+net.add(ActivationLayer(Softmax, Softmax_der))
 
-image = X_test[np.random.randint(0, X_test.shape[0])]
-pixels = np.reshape(image, (28, 28))
-plt.imshow(pixels, cmap='gray')
-net.forward(np.array([image]))
-print(net.output)
-plt.show()
+net.backpropogate(X_train, y_train, 0.1, 50)
+
+print("Predicted:")
+rand = np.random.randint(0, X_test.shape[0] - 4)
+print(net.forward(X_test[rand:rand+3]))
+print("True:")
+print(y_test[rand:rand+3])
