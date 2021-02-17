@@ -163,13 +163,13 @@ def MSE_der(y, yhat):
 
 net = Network(MSE, MSE_der)
 net.add(FCLayer(28*28, 15))
-net.add(ActivationLayer(tanh, tanh_prime))
+net.add(ActivationLayer(Sigmoid, Sigmoid_der))
 net.add(FCLayer(15, 15))
-net.add(ActivationLayer(tanh, tanh_prime))
+net.add(ActivationLayer(Sigmoid, Sigmoid_der))
 net.add(FCLayer(15, 10))
-net.add(ActivationLayer(tanh, tanh_prime))
+net.add(ActivationLayer(Sigmoid, Sigmoid_der))
 
-net.backpropogate(X_train, y_train, 0.1, 50)
+net.backpropogate(X_train, y_train, 0.1, 30)
 
 print("Predicted:")
 rand = np.random.randint(0, X_test.shape[0] - 4)
