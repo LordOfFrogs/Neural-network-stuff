@@ -4,9 +4,28 @@ from sklearn.model_selection import train_test_split
 from os import error
 import numpy as np
 import matplotlib.pyplot as plt
+from keras.datasets import mnist
+from keras.utils import np_utils
 
 #fetch data
-x, y_labels = fetch_openml('mnist_784', version=1, return_X_y=True)
+(X_train, y_train), (X_test, y_test) = mnist.load_data()
+
+# training data : 60000 samples
+# reshape and normalize input data
+X_train = X_train.reshape(X_train.shape[0], 1, 28*28)
+X_train = X_train.astype('float32')
+X_train /= 255
+# encode output which is a number in range [0,9] into a vector of size 10
+# e.g. number 3 will become [0, 0, 0, 1, 0, 0, 0, 0, 0, 0]
+y_train = np_utils.to_categorical(y_train)
+
+# same for test data : 10000 samples
+X_test = X_test.reshape(X_test.shape[0], 1, 28*28)
+X_test = X_test.astype('float32')
+X_test /= 255
+y_test = np_utils.to_categorical(y_test)
+
+'''x, y_labels = fetch_openml('mnist_784', version=1, return_X_y=True)
 
 x = (x/255).astype('float32')
 y = np.zeros((y_labels.shape[0], 10))
@@ -14,9 +33,8 @@ y = np.zeros((y_labels.shape[0], 10))
 for i in range(y_labels.shape[0]):
     y[i][int(y_labels[i])] = 1
 
-X_train, X_test, y_train, y_test = train_test_split(x, y, test_size=0.15, random_state=42)
-'''X_train = X_train.T
-X_test = X_test.T'''
+X_train, X_test, y_train, y_test = train_test_split(x, y, test_size=0.15, random_state=42)'''
+
 
 '''np.random.seed(42)
 
@@ -33,14 +51,9 @@ for i in range(2100):
     one_hot_labels[i][labels[i]] = 1'''
 
 class Network(object):
-    def __init__(self, activation, activation_der, output_activation, output_activation_der, Loss, Loss_der):
+    def __init__(self, Loss, Loss_der):
         self.Loss = Loss
         self.Loss_der = Loss_der
-        self.activation = activation
-        self.output_activation = output_activation
-        self.activation_der = activation_der
-        self.output_activation_der = output_activation_der
-        
         # initialize layers
         self.layers = []
         
@@ -57,7 +70,7 @@ class Network(object):
             # forward propagation
             output = inputs[i]
             for layer in self.layers:
-                output = layer.forward_propagation(output)
+                output = layer.forward(output)
             result.append(output)
 
         return result
@@ -65,7 +78,6 @@ class Network(object):
     def backpropogate(self, inputs, targets, learning_rate, epochs):
         # sample dimension first
         samples = len(inputs)
-
         # training loop
         for i in range(epochs):
             err = 0
@@ -73,7 +85,7 @@ class Network(object):
                 # forward propagation
                 output = inputs[j]
                 for layer in self.layers:
-                    output = layer.forward_propagation(output)
+                    output = layer.forward(output)
 
                 # compute loss (for display purpose only)
                 err += self.Loss(targets[j], output)
@@ -81,7 +93,7 @@ class Network(object):
                 # backward propagation
                 error = self.Loss_der(targets[j], output)
                 for layer in reversed(self.layers):
-                    error = layer.backward_propagation(error, learning_rate)
+                    error = layer.backpropogate(error, learning_rate)
 
             # calculate average error on all samples
             err /= samples
@@ -102,7 +114,7 @@ class FCLayer(object):
         weights_error = np.dot(self.input.T, output_error)
 
         self.weights -= learning_rate * weights_error
-        self.bias -= learning_rate * output_error
+        self.biases -= learning_rate * output_error
         return input_error
     
 class ActivationLayer(object):
@@ -115,8 +127,8 @@ class ActivationLayer(object):
         self.output = self.activation(self.input)
         return self.output
     
-    def backpropogate(self, output_error):
-        return self.activation_prime(self.input) * output_error
+    def backpropogate(self, output_error, learning_rate):
+        return self.activation_der(self.input) * output_error
 
 
 # activations 
@@ -131,6 +143,11 @@ def Softmax_der(x):
     exps = np.exp(x - x.max())
     return exps / np.sum(exps, axis=0) * (1 - exps / np.sum(exps, axis=0))
 
+def tanh(x):
+    return np.tanh(x)
+def tanh_prime(x):
+    return 1-np.tanh(x)**2
+
 def CrossEntropy(y, yhat):
     L_sum = np.sum(np.multiply(y, np.log(yhat)))
     m = y.shape[1]
@@ -144,13 +161,13 @@ def MSE(y, yhat):
 def MSE_der(y, yhat):
     return 2*(yhat-y)/y.size
 
-net = Network(Sigmoid, Sigmoid_der, Softmax, Softmax_der, MSE, MSE_der)
+net = Network(MSE, MSE_der)
 net.add(FCLayer(28*28, 15))
-net.add(ActivationLayer(Sigmoid, Sigmoid_der))
+net.add(ActivationLayer(tanh, tanh_prime))
 net.add(FCLayer(15, 15))
-net.add(ActivationLayer(Sigmoid, Sigmoid_der))
+net.add(ActivationLayer(tanh, tanh_prime))
 net.add(FCLayer(15, 10))
-net.add(ActivationLayer(Softmax, Softmax_der))
+net.add(ActivationLayer(tanh, tanh_prime))
 
 net.backpropogate(X_train, y_train, 0.1, 50)
 
