@@ -173,6 +173,6 @@ net.backpropogate(X_train, y_train, 0.1, 30)
 
 print("Predicted:")
 rand = np.random.randint(0, X_test.shape[0] - 4)
-print(net.forward(X_test[rand:rand+3]))
+print(net.forward(X_test[rand:rand+3]).tolist())
 print("True:")
 print(y_test[rand:rand+3])
