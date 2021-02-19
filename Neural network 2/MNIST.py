@@ -29,8 +29,8 @@ net.add(FCLayer(15, 15))
 net.add(ActivationLayer(Activations.Sigmoid, Activations.Sigmoid_der))
 net.add(FCLayer(15, 10))
 net.add(ActivationLayer(Activations.Sigmoid, Activations.Sigmoid_der))
-
-net.backpropogate(X_train, y_train, 0.1, 30)
+print(X_train.shape)
+net.fit(X_train, y_train, 0.1, 30)
 
 print("Predicted:")
 rand = np.random.randint(0, X_test.shape[0] - 4)

@@ -8,9 +8,6 @@ class Activations:
 
     def Softmax(x):
         return np.exp(x) / np.sum(np.exp(x), axis=1, keepdims=True) 
-    def Softmax_der(x):
-        exps = np.exp(x - x.max())
-        return exps / np.sum(exps, axis=0) * (1 - exps / np.sum(exps, axis=0))
 
     def tanh(x):
         return np.tanh(x)
