@@ -1,4 +1,9 @@
+import os
+from sklearn.datasets import fetch_openml
+from sklearn.model_selection import train_test_split
+from os import error
 import numpy as np
+import matplotlib.pyplot as plt
 from keras.datasets import mnist
 from keras.utils import np_utils
 
@@ -20,6 +25,30 @@ X_test = X_test.astype('float32')
 X_test /= 255
 y_test = np_utils.to_categorical(y_test)
 
+'''x, y_labels = fetch_openml('mnist_784', version=1, return_X_y=True)
+
+x = (x/255).astype('float32')
+y = np.zeros((y_labels.shape[0], 10))
+
+for i in range(y_labels.shape[0]):
+    y[i][int(y_labels[i])] = 1
+
+X_train, X_test, y_train, y_test = train_test_split(x, y, test_size=0.15, random_state=42)'''
+
+
+'''np.random.seed(42)
+
+cat_images = np.random.randn(700, 2) + np.array([0, -3])
+mouse_images = np.random.randn(700, 2) + np.array([3, 3])
+dog_images = np.random.randn(700, 2) + np.array([-3, 3])
+
+feature_set = np.vstack([cat_images, mouse_images, dog_images])
+
+labels = np.array([0]*700 + [1]*700 + [2]*700)
+
+one_hot_labels = np.zeros((2100, 3))
+for i in range(2100):
+    one_hot_labels[i][labels[i]] = 1'''
 
 class Network(object):
     def __init__(self, Loss, Loss_der):
