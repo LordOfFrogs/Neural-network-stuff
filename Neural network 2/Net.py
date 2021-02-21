@@ -1,4 +1,5 @@
 import numpy as np
+from ProgressBar import ProgressBar
 
 class Network(object):
     def __init__(self, Loss, Loss_der):
@@ -47,7 +48,7 @@ class Network(object):
 
             # calculate average error on all samples
             err /= samples
-            print('epoch %d/%d   error=%f' % (i+1, epochs, err))
+            ProgressBar.printProgressBar(i+1, epochs, 'Training progress', 'Error: %f ' % (err), length=50)
                 
 class FCLayer(object):
     def __init__(self, n_inputs, n_neurons):
