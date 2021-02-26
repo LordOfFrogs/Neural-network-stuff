@@ -8,6 +8,7 @@ from datetime import timedelta
 import matplotlib.pyplot as plt
 import pandas as pd
 from ProgressBar import ProgressBar
+from pytz import timezone
 
 startingMoney = 5000.00
 money = startingMoney
@@ -16,13 +17,14 @@ ticker = 'MSFT'
 risk = 5
 stocks_time = []
 
+tz = timezone('EST')
 MINUTES_IN_DAY = 389
 # get data
 historical_data = []
 mins = []
 maxes = []
 for i in range(500):
-    historical_data.append(yf.download(ticker, end=dt.now() - timedelta(days=i),
+    historical_data.append(yf.download(ticker, end=dt.now(tz) - timedelta(days=i),
                                        interval='1m', period='1d', progress=False).Close.to_numpy())
     ProgressBar.printProgressBar(
         i+1, 500, 'Downloading Stock Data: ', length=50)
@@ -53,7 +55,7 @@ net.add(FCLayer(15, 1))
 net.add(ActivationLayer(Activations.Sigmoid, Activations.Sigmoid_der))
 net.fit(X_train, y_train, 0.1, 30)
 
-#region test
+# region test
 '''# test
 test_data = yf.download(ticker, end=dt.today(), period='1wk',
                         interval='1m', progress=False).Close.to_numpy()
@@ -83,13 +85,14 @@ print(f'Raw Gain: {raw_gain}')
 print(f'Stonks after week: {stocks}')
 plt.plot(stocks_time)
 plt.show()'''
-#endregion
+# endregion
 
-#run
+# run
 prevData = np.zeros((MINUTES_IN_DAY-1))
 while True:
-    data = yf.download(ticker, start=dt.now()-timedelta(days=1), end=dt.now(), interval='1m', progress=False)
-    data = data.Close.to_numpy()[:-1]
+    data = yf.download(ticker, start=dt.now(tz=tz)-timedelta(days=1),
+                       end=dt.now(tz=tz), interval='1m', progress=False).Close
+    data = data.to_numpy()[:-1]
     if(prevData[0] != data[0]):
         min = np.min(data)
         X = data - min
