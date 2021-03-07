@@ -2,9 +2,8 @@ from time import time
 from Net import Network, ActivationLayer, FCLayer
 from ActivationsLosses import Activations, Loss
 import numpy as np
-import yfinance as yf
+
 from datetime import datetime as dt, timedelta
-from datetime import timedelta
 import matplotlib.pyplot as plt
 import pandas as pd
 from ProgressBar import ProgressBar
@@ -13,21 +12,28 @@ from pytz import timezone
 startingMoney = 5000.00
 money = startingMoney
 stocks = 0
-ticker = 'MSFT'
+ticker = 'BTC-USD'
 risk = 5
 stocks_time = []
 
 tz = timezone('EST')
-MINUTES_IN_DAY = 389
+MINUTES_IN_DAY = 1415
 # get data
 historical_data = []
 mins = []
 maxes = []
-for i in range(500):
-    historical_data.append(yf.download(ticker, end=dt.now(tz) - timedelta(days=i),
-                                       interval='1m', period='1d', progress=False).Close.to_numpy())
+days = 29
+
+data = pd.read_csv("bitstampUSD_1-min_data_2012-01-01_to_2020-04-22.csv")
+data.head()
+
+
+for i in range(days):
+    data = yf.download(ticker, start=dt.now(tz=tz) - timedelta(days=i+1), end=dt.now(tz=tz) - timedelta(days=i),
+                       interval='1m', progress=False).Close.to_numpy()
+    historical_data.append(data)
     ProgressBar.printProgressBar(
-        i+1, 500, 'Downloading Stock Data: ', length=50)
+        i+1, days, 'Downloading Stock Data: ', length=50)
 print('Download Complete')
 # prepare data
 for i in range(len(historical_data)):
@@ -36,13 +42,15 @@ for i in range(len(historical_data)):
     maxes.append(np.max(historical_data[i]))
     historical_data[i] /= maxes[i]
 
-X_train = []
-y_train = []
+X_train = np.ndarray((len(historical_data), MINUTES_IN_DAY-1))
+y_train = np.ndarray((len(historical_data)))
+x = 0
 for i in historical_data:
-    X_train.append([i[1:]])
-    y_train.append([i[0]])
-X_train = np.array(X_train)
-y_train = np.array(y_train)
+    X_train[x] = np.array(i[1:])
+    y_train[x] = np.array(i[0])
+    x += 1
+X_train = X_train.reshape((len(historical_data), 1, MINUTES_IN_DAY-1))
+y_train = y_train.reshape((len(historical_data), 1))
 
 
 # create network
@@ -90,7 +98,7 @@ plt.show()'''
 # run
 prevData = np.zeros((MINUTES_IN_DAY-1))
 while True:
-    data = yf.download(ticker, start=dt.now(tz=tz)-timedelta(days=1),
+    data = yf.download(ticker, period='1d',
                        end=dt.now(tz=tz), interval='1m', progress=False).Close
     data = data.to_numpy()[:-1]
     if(prevData[0] != data[0]):
