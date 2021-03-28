@@ -1,18 +1,24 @@
 import numpy as np
 
+
 class Activations:
     def Sigmoid(x):
-        return 1 / (1 + np.exp(-x))
+        return np.where(x >= 0,
+                        1 / (1 + np.exp(-x)),
+                        np.exp(x) / (1 + np.exp(x)))
+
     def Sigmoid_der(x):
-        return (np.exp(-x))/((np.exp(-x)+1)**2)
+        return Activations.Sigmoid(x)*(1-Activations.Sigmoid(x))
 
     def Softmax(x):
-        return np.exp(x) / np.sum(np.exp(x), axis=1, keepdims=True) 
+        return np.exp(x) / np.sum(np.exp(x), axis=1, keepdims=True)
 
     def tanh(x):
         return np.tanh(x)
-    def tanh_prime(x):
+
+    def tanh_der(x):
         return 1-np.tanh(x)**2
+
 
 class Loss:
     def CrossEntropy(y, yhat):
