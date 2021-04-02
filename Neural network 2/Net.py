@@ -2,7 +2,7 @@ import numpy as np
 from ProgressBar import ProgressBar
 
 
-class Network(object):
+class CNN(object):
     def __init__(self, Loss, Loss_der):
         self.Loss = Loss
         self.Loss_der = Loss_der
