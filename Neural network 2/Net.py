@@ -91,8 +91,8 @@ class ActivationLayer(object):
 
 
 class RNN(object):
-    # This is code I took from https://datascience-enthusiast.com/DL/Building_a_Recurrent_Neural_Network-Step_by_Step_v1.html
-    # also there is no backpropogation
+    # This is code from https://datascience-enthusiast.com/DL/Building_a_Recurrent_Neural_Network-Step_by_Step_v1.html
+    # I have not implemented backpropogation yet
     def __init__(self, n_inputs, n_hidden, n_output, Activation, Actiavation_output):
         self.params = {}
         self.params["Wf"] = np.random.randn(n_hidden, n_hidden + n_inputs)

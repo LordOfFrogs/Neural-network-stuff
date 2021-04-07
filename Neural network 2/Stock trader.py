@@ -1,4 +1,5 @@
-from re import T
+##### OLD CODE #####
+
 from Net import CNN, ActivationLayer, FCLayer
 from ActivationsLosses import Activations, Loss
 import numpy as np
@@ -15,7 +16,6 @@ from tensorflow.keras import layers
 
 def unix_time_millis(dt_obj):
     return time.mktime(dt_obj.timetuple()) * 1000
-
 
 def flatten_list_2d(_2d_list):
     flat_list = []
