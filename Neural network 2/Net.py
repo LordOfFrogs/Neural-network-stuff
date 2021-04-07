@@ -88,3 +88,88 @@ class ActivationLayer(object):
 
     def backpropogate(self, output_error, learning_rate):
         return self.activation_der(self.input) * output_error
+
+
+class RNN(object):
+    # This is code I took from https://datascience-enthusiast.com/DL/Building_a_Recurrent_Neural_Network-Step_by_Step_v1.html
+    # also there is no backpropogation
+    def __init__(self, n_inputs, n_hidden, n_output, Activation, Actiavation_output):
+        self.params = {}
+        self.params["Wf"] = np.random.randn(n_hidden, n_hidden + n_inputs)
+        self.params["bf"] = np.random.randn(n_hidden, 1)
+        self.params["Wi"] = np.random.randn(n_hidden, n_hidden + n_inputs)
+        self.params["bi"] = np.random.randn(n_hidden, 1)
+        self.params["Wc"] = np.random.randn(n_hidden, n_hidden + n_inputs)
+        self.params["bc"] = np.random.randn(n_hidden, 1)
+        self.params["Wo"] = np.random.randn(n_hidden, n_hidden + n_inputs)
+        self.params["bo"] = np.random.randn(n_hidden, 1)
+        self.params["Wy"] = np.random.randn(n_output, n_hidden)
+        self.params["by"] = np.random.randn(n_output, 1)
+        self.act = Activation
+        self.act_out = Actiavation_output
+        self.n_inputs = n_inputs
+        self.n_hidden = n_hidden
+        self.n_output = n_output
+
+    def cell_forward(self, xt, a_prev, c_prev):
+        Wf = self.params["Wf"]
+        bf = self.params["bf"]
+        Wi = self.params["Wi"]
+        bi = self.params["bi"]
+        Wc = self.params["Wc"]
+        bc = self.params["bc"]
+        Wo = self.params["Wo"]
+        bo = self.params["bo"]
+        Wy = self.params["Wy"]
+        by = self.params["by"]
+        Activation = self.act
+        Activation_output = self.act_out
+
+        # Retrieve dimensions from shapes of xt and Wy
+        n_x, m = xt.shape
+        n_y, n_a = Wy.shape
+
+        # Concatenate a_prev and xt (≈3 lines)
+        concat = np.zeros((n_a + n_x, m))
+        concat[: n_a, :] = a_prev
+        concat[n_a:, :] = xt
+
+        # Compute values for ft, it, cct, c_next, ot, a_next using the formulas given figure (4) (≈6 lines)
+        ft = Activation(np.dot(Wf, concat) + bf)
+        it = Activation(np.dot(Wi, concat) + bi)
+        cct = Activation(np.dot(Wc, concat) + bc)
+        c_next = ft * c_prev + it * cct
+        ot = Activation(np.dot(Wo, concat) + bo)
+        a_next = ot * Activation(c_next)
+
+        # Compute prediction of the LSTM cell (≈1 line)
+        yt_pred = Activation_output(np.dot(Wy, a_next) + by)
+
+        return a_next, c_next, yt_pred
+
+    def forward(self, x, a0):
+        # Retrieve dimensions from shapes of x and Wy (≈2 lines)
+        n_x, m, T_x = x.shape
+        n_y, n_a = self.params["Wy"].shape
+
+        # initialize "a", "c" and "y" with zeros (≈3 lines)
+        a = np.zeros((n_a, m, T_x))
+        c = a
+        y = np.zeros((n_y, m, T_x))
+
+        # Initialize a_next and c_next (≈2 lines)
+        a_next = a0
+        c_next = np.zeros(a_next.shape)
+
+        # loop over all time-steps
+        for t in range(T_x):
+            # Update next hidden state, next memory state, compute the prediction, get the cache (≈1 line)
+            a_next, c_next, yt = self.cell_forward(x[:, :, t], a_next, c_next)
+            # Save the value of the new "next" hidden state in a (≈1 line)
+            a[:, :, t] = a_next
+            # Save the value of the prediction in y (≈1 line)
+            y[:, :, t] = yt
+            # Save the value of the next cell state (≈1 line)
+            c[:, :, t] = c_next
+
+        return y

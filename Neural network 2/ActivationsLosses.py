@@ -11,7 +11,7 @@ class Activations:
         return Activations.Sigmoid(x)*(1-Activations.Sigmoid(x))
 
     def Softmax(x):
-        return np.exp(x) / np.sum(np.exp(x), axis=1, keepdims=True)
+        return np.exp(x) / np.sum(np.exp(x))
 
     def tanh(x):
         return np.tanh(x)
