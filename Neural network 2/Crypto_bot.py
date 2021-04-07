@@ -63,17 +63,19 @@ def fetch_data(start, stop, symbol='btcusd', interval='1m', tick_limit=1000, ste
 
 
 class Agent_controller:
-    def __init__(self, base_inputs, base_hidden, base_risk, mutation_amount):
+    def __init__(self, base_inputs, base_hidden, base_risk, mutation_amount, funds):
         self.agents = []
         self.base_inputs = base_inputs
         self.base_hidden = base_hidden
-        self.base_model = RNN(base_inputs, base_hidden, 3,
+        self.base_model = RNN(base_inputs, base_hidden, 2,
                               Activations.Sigmoid, Activations.Softmax)
         self.mutation_amount = mutation_amount
+        self.base_risk = base_risk
+        self.funds = funds
 
     def spawn(self, amount):
         for i in range(amount):
-            self.agents.append(Agent(self.base_model))
+            self.agents.append(Agent(self.base_model, self.funds, self.base_risk))
         for agent in self.agents:
             agent.Mutate(self.mutation_amount)
 
@@ -108,13 +110,16 @@ class Agent:
         X, _, _ = Normalize(data)
         X = X.reshape((self.n_inputs, 1, 1))
         prediction = self.model.forward(
-            X, np.random.randn(self.model.n_hidden, 1)).reshape((3,))
-        if np.argmax(prediction) is 0:
+            X, np.random.randn(self.model.n_hidden, 1)).reshape((2,))
+        if prediction[0] > prediction[1]:
             self.funds -= self.risk
-            self.crypto += data[-1]
+            self.crypto += self.risk/data[-1]
+        else:
+            self.funds += self.risk
+            self.crypto += self.risk/data[-1]
         return prediction
 
 
-controller = Agent_controller(60, 100, 5, 0.1)
+controller = Agent_controller(60, 100, 5, 0.1, 1000)
 controller.spawn(50)
 controller.Generation(np.random.randn(1000))
