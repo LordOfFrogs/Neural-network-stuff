@@ -8,6 +8,7 @@ from Net import RNN
 from ActivationsLosses import Activations
 from ProgressBar import ProgressBar
 
+n_RNN_PARAMS = 13
 
 def Classify_gain(current, past):
     if current > past:
@@ -69,7 +70,7 @@ def fetch_data(start, stop, symbol='btcusd', interval='1m', tick_limit=1000, ste
 
 
 class Agent_controller:
-    def __init__(self, base_inputs, base_hidden, base_risk, mutation_amount, funds):
+    def __init__(self, base_inputs, base_hidden, base_risk, mutation_amount, funds, top_pairs):
         self.agents = []
         self.base_inputs = base_inputs
         self.base_hidden = base_hidden
@@ -78,11 +79,12 @@ class Agent_controller:
         self.mutation_amount = mutation_amount
         self.base_risk = base_risk
         self.funds = funds
+        self.top_pairs = top_pairs
 
     def spawn(self, amount):
         for i in range(amount):
             self.agents.append(
-                Agent(self.base_model, self.funds, self.base_risk))
+                Agent(self.base_model, self.funds, self.base_risk, self.base_hidden))
         for agent in self.agents:
             agent.Mutate(self.mutation_amount)
 
@@ -98,6 +100,30 @@ class Agent_controller:
 
         for i in range(max_inputs, data.shape[0]-1):
             self.step(data[i-max_inputs:i])
+        
+        best_agents = self.get_best_agents(self.top_pairs*2)
+        np.random.shuffle(best_agents)
+        pairs = []
+        for i in range(len(best_agents)/2):
+            pairs.append((best_agents[i], best_agents[i+1]))
+            
+        for pair in pairs:
+            choices = np.random.choice(1, n_RNN_PARAMS)
+            n_inputs = pair[choices[10]].n_inputs
+            risk = pair[choices[11]].risk
+            a0 = pair[choices[12]].a0
+            params = pair[0].model.params
+            for i in range(len(params.values())):
+                if choices[i]:
+                    params[i] = 
+
+    def get_best_agents(self, num):
+        exchange = fetch_data(unix_time_millis(dt.utcnow()-timedelta(hours=1)), unix_time_millis(dt.utcnow()), interval='1m')[-1]
+        sorted_agents = sorted(self.agents, key=lambda agent: self.get_score(agent, exchange))
+        return sorted_agents[:num]
+
+    def get_score(_, agent, exchange):
+        return agent.funds + agent.crypto*exchange
 
 
 class Agent:
@@ -112,8 +138,8 @@ class Agent:
     def Mutate(self, amount):
         for param in self.model.params.values():
             param += np.random.random(param.shape) * amount
-        self.n_inputs += round(np.random.randn(1)*amount*100)
-        self.risk += np.random.randn(1)*amount
+        self.n_inputs += round(np.random.randn(1)[0]*amount*100)
+        self.risk += np.random.randn(1)[0]*amount
         self.a0 += np.random.randn(self.model.n_hidden, 1)
 
     def step(self, data):
@@ -121,16 +147,13 @@ class Agent:
         X, _, _ = Normalize(data)
         X = X.reshape((self.n_inputs, 1, 1))
         prediction = self.model.forward(
-            X, np.random.randn(self.a0)).reshape((2,))
+            X, self.a0).reshape((2,))
         if prediction[0] > prediction[1]:
             self.funds -= self.risk
             self.crypto += self.risk/data[-1]
         else:
             self.funds += self.risk
             self.crypto += self.risk/data[-1]
-
-    def get_funds(self):
-        return self.funds + self.crypto*fetch_data(unix_time_millis(dt.utcnow()-timedelta(hours=1)), unix_time_millis(dt.utcnow()), interval='1m')[-1]
 
 
 controller = Agent_controller(60, 100, 5, 0.1, 1000)
