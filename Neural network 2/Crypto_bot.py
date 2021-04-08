@@ -18,6 +18,7 @@ def Classify_gain(current, past):
 
 
 def unix_time_millis(dt_obj):
+    # convert Datetime to millis since epoch
     return time.mktime(dt_obj.timetuple()) * 1000
 
 
@@ -27,7 +28,7 @@ def Normalize(x):
     return (x-min)/(max-min), max, min
 
 
-def Normalize_pre(x, max, min):
+def Normalize_pre(x, max, min): # Normalize with already set min and max
     return (x-min)/(max-min)
 
 
@@ -72,8 +73,8 @@ def fetch_data(start, stop, symbol='btcusd', interval='1m', tick_limit=1000, ste
 class Agent_controller:
     def __init__(self, base_inputs, base_hidden, base_risk, mutation_amount, funds, top_pairs):
         self.agents = []
-        self.base_inputs = base_inputs
-        self.base_hidden = base_hidden
+        self.base_inputs = base_inputs # number of inputs at start
+        self.base_hidden = base_hidden # starting hidden state
         self.base_model = RNN(base_inputs, base_hidden, 2,
                               Activations.Sigmoid, Activations.Softmax)
         self.mutation_amount = mutation_amount
@@ -84,41 +85,49 @@ class Agent_controller:
     def spawn(self, amount):
         for i in range(amount):
             self.agents.append(
-                Agent(self.base_model, self.funds, self.base_risk, self.base_hidden))
+                Agent(self.base_model, self.funds, self.base_risk, self.base_hidden)) # create new model
         for agent in self.agents:
-            agent.Mutate(self.mutation_amount)
+            agent.Mutate(self.mutation_amount) # mutate
 
     def step(self, data):
         for agent in self.agents:
             agent.step(data)
 
     def Generation(self, data):
+        # find agent with most inputs
         max_inputs = 0
         for agent in self.agents:
             if agent.n_inputs > max_inputs:
                 max_inputs = agent.n_inputs
-
+        # test
         for i in range(max_inputs, data.shape[0]-1):
             self.step(data[i-max_inputs:i])
         
+        # find best agents
         best_agents = self.get_best_agents(self.top_pairs*2)
         np.random.shuffle(best_agents)
         pairs = []
         for i in range(len(best_agents)/2):
             pairs.append((best_agents[i], best_agents[i+1]))
-            
+           
+        # create new generation
         for pair in pairs:
-            choices = np.random.choice(1, n_RNN_PARAMS)
-            n_inputs = pair[choices[10]].n_inputs
-            risk = pair[choices[11]].risk
-            a0 = pair[choices[12]].a0
-            params = pair[0].model.params
-            for i in range(len(params.values())):
-                if choices[i]:
-                    params[i] = 
+            for _ in range(2): # to have same # of agents
+                choices = np.random.choice(1, n_RNN_PARAMS) # to choose between agents
+                self.base_inputs = pair[choices[10]].n_inputs
+                self.base_risk = pair[choices[11]].risk
+                self.a0 = pair[choices[12]].a0
+                self.base_model = RNN(base_inputs, base_hidden, 2,
+                                  Activations.Sigmoid, Activations.Softmax)
+                params = pair[0].model.params
+                for i in range(len(params.values())):
+                    if choices[i]:
+                        params[i] = pair[1].model.params.values()
+                self.base_model.params = params
+                self.spawn(1)
 
     def get_best_agents(self, num):
-        exchange = fetch_data(unix_time_millis(dt.utcnow()-timedelta(hours=1)), unix_time_millis(dt.utcnow()), interval='1m')[-1]
+        exchange = fetch_data(unix_time_millis(dt.utcnow()-timedelta(hours=1)), unix_time_millis(dt.utcnow()), interval='1m')[-1] # get current price
         sorted_agents = sorted(self.agents, key=lambda agent: self.get_score(agent, exchange))
         return sorted_agents[:num]
 
@@ -147,13 +156,14 @@ class Agent:
         X, _, _ = Normalize(data)
         X = X.reshape((self.n_inputs, 1, 1))
         prediction = self.model.forward(
-            X, self.a0).reshape((2,))
-        if prediction[0] > prediction[1]:
-            self.funds -= self.risk
-            self.crypto += self.risk/data[-1]
-        else:
+            X, self.a0).reshape((2,)) # predict
+        if prediction[0] > prediction[1]: # buy
+            if self.funds > self.risk:
+                self.funds -= self.risk
+                self.crypto += self.risk/data[-1]
+        elif self.crypto > self.risk/data[-1]: # sell
             self.funds += self.risk
-            self.crypto += self.risk/data[-1]
+            self.crypto -= self.risk/data[-1]
 
 
 controller = Agent_controller(60, 100, 5, 0.1, 1000)
