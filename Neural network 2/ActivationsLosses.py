@@ -3,9 +3,14 @@ import numpy as np
 
 class Activations:
     def Sigmoid(x):
-        return np.where(x >= 0,
-                        1 / (1 + np.exp(-x)),
-                        np.exp(x) / (1 + np.exp(x)))
+        z = 1.
+        try:
+            z =  np.where(x >= 0,
+                            1 / (1 + np.exp(-x)),
+                            np.exp(x) / (1 + np.exp(x)))
+        except:
+            print(x)
+        return z
 
     def Sigmoid_der(x):
         return Activations.Sigmoid(x)*(1-Activations.Sigmoid(x))
