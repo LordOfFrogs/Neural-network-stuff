@@ -1,5 +1,6 @@
 from datetime import datetime as dt, timedelta
 import time
+import copy
 
 import matplotlib.pyplot as plt
 import pandas as pd
@@ -84,36 +85,54 @@ class Agent_controller:
         self.base_risk = base_risk
         self.funds = funds
 
-    def spawn(self, amount):
+    def spawn(self, amount, from_base=True):
         for i in range(amount):
-            self.agents.append(
-                Agent(self.base_model, self.funds, self.base_risk, self.base_hidden))  # create new model
-        for agent in self.agents:
-            agent.Mutate(self.mutation_amount)  # mutate
+            if from_base:
+                self.agents.append(
+                    Agent(self.base_model, self.funds, self.base_risk, np.random.randn(self.base_hidden, 1)))  # create new model
+            else:
+                self.agents.append(
+                    Agent(RNN(self.base_inputs, self.base_hidden, 2,
+                              Activations.Sigmoid, Activations.Softmax), self.funds, self.base_risk, np.random.randn(self.base_hidden, 1)))  # create new model
+        for agent in range(1, len(self.agents)):
+            self.agents[agent].Mutate(self.mutation_amount)  # mutate
 
     def step(self, data):
         for agent in self.agents:
             agent.step(data)
 
     def Generation(self, data):
+        exchange = fetch_data(unix_time_millis(dt.utcnow()-timedelta(days=1)),
+                              unix_time_millis(dt.utcnow()), interval='1m')[-1]
         # find agent with most inputs
         max_inputs = 0
         for agent in self.agents:
             if agent.model.n_inputs > max_inputs:
                 max_inputs = agent.model.n_inputs
+        #moneys1 = []
+        #moneys2 = []
+        #coins = []
         # test
         for i in range(max_inputs, data.shape[0]-1):
-            self.step(data[i-max_inputs:i])
-
+            self.step(copy.copy(data[i-max_inputs:i]))
+            #moneys1.append(self.agents[0].get_score(exchange))
+            #moneys2.append(self.agents[-1].get_score(exchange))
+            ProgressBar.printProgressBar(
+                i-max_inputs+1, data.shape[0]-1, prefix='Running generation', length=50)
+        #plt.plot(moneys1)
+        #plt.plot(moneys2)
+        #plt.show()
+        
         # find best agents
-        best_agents = self.get_best_agents(int(len(self.agents)/2))
+        best_agents = self.get_best_agents(len(self.agents))
         np.random.shuffle(best_agents)
         pairs = []
         for i in range(int(len(best_agents)/2)):
             pairs.append((best_agents[i], best_agents[i+1]))
 
+        print(
+            f'Best Score: {self.get_best_agents(1)[0].get_score(exchange)}')
         self.agents.clear()
-        
         # create new generation
         for pair in pairs:
             for _ in range(2):  # to have same # of agents
@@ -123,12 +142,12 @@ class Agent_controller:
                 self.a0 = pair[choices[12]].a0
                 self.base_model = RNN(self.base_inputs, self.base_hidden, 2,
                                       Activations.Sigmoid, Activations.Softmax)
-                params = pair[0].model.params
+                params = pair[0].model.params.copy()
                 for i in range(len(params.values())):
                     if choices[i]:
                         params[i] = pair[1].model.params.values()
                 self.base_model.params = params
-                self.spawn(1)
+                self.spawn(1, True)
 
     def Run(self, generations):
         if generations != 0:
@@ -136,36 +155,40 @@ class Agent_controller:
                 data = fetch_data(unix_time_millis(
                     dt.utcnow()-timedelta(weeks=1)), unix_time_millis(dt.utcnow()), interval='1m')
                 self.Generation(data)
-            return self.get_best_agents(1)
+            return self.get_best_agents(1)[0]
         else:
-            try:
-                while True:
+            generation = 0
+            while True:
+                try:
                     data = fetch_data(unix_time_millis(
                         dt.utcnow()-timedelta(weeks=1)), unix_time_millis(dt.utcnow()), interval='1m')
                     self.Generation(data)
-            except KeyboardInterrupt:
-                pickle.dump(self.get_best_agents(
-                    1), open('Saved_model.pickle', 'wb'))
-                raise
+                    generation += 1
+                    print(f'Generation: {generation}')
+                    pickle.dump(self.get_best_agents(
+                        1), open('Saved_model.pickle', 'wb'))
+                except KeyboardInterrupt:
+                    pickle.dump(self.get_best_agents(
+                        1), open('Saved_model.pickle', 'wb'))
+                    raise
 
     def get_best_agents(self, num):
         exchange = fetch_data(unix_time_millis(dt.utcnow()-timedelta(days=1)),
                               unix_time_millis(dt.utcnow()), interval='1m')[-1]  # get current price
         sorted_agents = sorted(
-            self.agents, key=lambda agent: self.get_score(agent, exchange))
+            self.agents, key=lambda agent: agent.get_score(exchange), reverse=True)
         return sorted_agents[:num]
-
-    def get_score(_, agent, exchange):
-        return agent.funds + agent.crypto*exchange
-
 
 class Agent:
     def __init__(self, model, funds, risk, a0):
-        self.model = model
+        self.model = copy.deepcopy(model)
         self.funds = funds
-        self.crypto = 0.0
+        self.crypto = 0.
         self.risk = risk
-        self.a0 = a0
+        self.a0 = copy.copy(a0)
+        self.buys = 0
+        self.sells = 0
+        self.buy_sell_ratio = 1.
 
     def Mutate(self, amount):
         for param in self.model.params.values():
@@ -180,14 +203,24 @@ class Agent:
         prediction = self.model.forward(
             X, self.a0).reshape((2,))  # predict
         if prediction[0] > prediction[1]:  # buy
+            self.buys += 1
             if self.funds > self.risk:
                 self.funds -= self.risk
                 self.crypto += self.risk/data[-1]
-        elif self.crypto > self.risk/data[-1]:  # sell
-            self.funds += self.risk
-            self.crypto -= self.risk/data[-1]
+        else:  # sell
+            self.sells += 1
+            if self.crypto > self.risk/data[-1]:
+                self.funds += self.risk
+                self.crypto -= self.risk/data[-1]
+        if self.sells != 0:
+            self.buy_sell_ratio = self.buys/self.sells
+        else:
+            self.buy_sell_ratio = 0.
+            
+    def get_score(self, exchange):
+        return self.funds + self.crypto*exchange
 
 
-controller = Agent_controller(60, 100, 5, 0.1, 1000)
-controller.spawn(50)
+controller = Agent_controller(60, 100, 5.0, 0.1, 1000.0)
+controller.spawn(50, False)
 controller.Run(0)
