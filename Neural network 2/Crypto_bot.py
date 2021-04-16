@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
 import bitfinex
+import yfinance as yf
 import pickle
 from Net import RNN
 from ActivationsLosses import Activations
@@ -40,8 +41,9 @@ def Denormalize(x, max, min):
     return x*(max - min)+min
 
 
-def fetch_data(start, stop, symbol='btcusd', interval='1m', tick_limit=1000, step=60000000):
-    # Create api instance
+def fetch_data(start, stop, symbol='btc-usd', interval='1m'):
+    #region get data with Bitfinex
+    '''# Create api instance
     api_v2 = bitfinex.bitfinex_v2.api_v2()
 
     data = []
@@ -56,7 +58,7 @@ def fetch_data(start, stop, symbol='btcusd', interval='1m', tick_limit=1000, ste
         ProgressBar.printProgressBar(
             starting-start, stop-start, prefix='Downloading data', length=50)
         time.sleep(1)
-    print('\n')
+    print()
     # Remove error messages
     # print(data)
     ind = [np.ndim(x) != 0 for x in data]
@@ -69,13 +71,24 @@ def fetch_data(start, stop, symbol='btcusd', interval='1m', tick_limit=1000, ste
     df.set_index('time', inplace=True)
     df.sort_index(inplace=True)
     df = df.reset_index(drop=True)['close']
-    data = df.to_numpy()
-
+    data = df.to_numpy()'''
+    #endregion
+    data = []
+    diff = stop-start
+    for i in range(diff.days):
+        df = yf.download(tickers=symbol, interval=interval, start=start+timedelta(days=i), end=start+timedelta(days=i)+diff/diff.days, progress=False)
+        df = df[::-1]
+        df = df.reset_index(drop=True)['Close'].to_list()
+        data.extend(df)
+        ProgressBar.printProgressBar(i+1, diff.days, prefix='Downloading data', length=50)
+        
+    data = np.array(data)
+    
     return data
 
 
 class Agent_controller:
-    def __init__(self, base_inputs, base_hidden, base_risk, mutation_amount, funds):
+    def __init__(self, base_inputs, base_hidden, base_risk, mutation_amount, funds, training_len):
         self.agents = []
         self.base_inputs = base_inputs  # number of inputs at start
         self.base_hidden = base_hidden  # starting hidden state
@@ -84,12 +97,21 @@ class Agent_controller:
         self.mutation_amount = mutation_amount
         self.base_risk = base_risk
         self.funds = funds
+        self.base_a0 = np.random.randn(base_hidden, 1)
+        self.training_len = training_len
+        
+    def load(self, agent):
+        self.base_model = agent.model
+        self.base_hidden = agent.model.n_hidden
+        self.base_inputs = agent.model.n_inputs
+        self.base_risk = agent.risk
+        self.base_a0 = agent.a0
 
     def spawn(self, amount, from_base=True):
         for i in range(amount):
             if from_base:
                 self.agents.append(
-                    Agent(self.base_model, self.funds, self.base_risk, np.random.randn(self.base_hidden, 1)))  # create new model
+                    Agent(self.base_model, self.funds, self.base_risk, self.base_a0))  # create new model
             else:
                 self.agents.append(
                     Agent(RNN(self.base_inputs, self.base_hidden, 2,
@@ -102,26 +124,14 @@ class Agent_controller:
             agent.step(data)
 
     def Generation(self, data):
-        exchange = fetch_data(unix_time_millis(dt.utcnow()-timedelta(days=1)),
-                              unix_time_millis(dt.utcnow()), interval='1m')[-1]
-        # find agent with most inputs
-        max_inputs = 0
-        for agent in self.agents:
-            if agent.model.n_inputs > max_inputs:
-                max_inputs = agent.model.n_inputs
-        #moneys1 = []
-        #moneys2 = []
-        #coins = []
-        # test
-        for i in range(max_inputs, data.shape[0]-1):
-            self.step(copy.copy(data[i-max_inputs:i]))
-            #moneys1.append(self.agents[0].get_score(exchange))
-            #moneys2.append(self.agents[-1].get_score(exchange))
+        exchange = fetch_data(dt.now()-timedelta(days=1),
+                              dt.now(), interval='1m')[-1]
+
+        start = np.random.randint(0, data.shape[0]-self.training_len)
+        for i in range(start, start+self.training_len):
+            self.step(copy.copy(data[i:i+self.base_inputs]))
             ProgressBar.printProgressBar(
-                i-max_inputs+1, data.shape[0]-1, prefix='Running generation', length=50)
-        #plt.plot(moneys1)
-        #plt.plot(moneys2)
-        #plt.show()
+                i-start, self.training_len, prefix='Running generation', length=50)
         
         # find best agents
         best_agents = self.get_best_agents(len(self.agents))
@@ -147,21 +157,21 @@ class Agent_controller:
                     if choices[i]:
                         params[i] = pair[1].model.params.values()
                 self.base_model.params = params
-                self.spawn(1, True)
+                self.spawn(1)
 
     def Run(self, generations):
         if generations != 0:
             for _ in range(generations):
-                data = fetch_data(unix_time_millis(
-                    dt.utcnow()-timedelta(weeks=1)), unix_time_millis(dt.utcnow()), interval='1m')
+                data = fetch_data(
+                    dt.now()-timedelta(weeks=10), dt.now(), interval='1m')
                 self.Generation(data)
             return self.get_best_agents(1)[0]
         else:
             generation = 0
             while True:
                 try:
-                    data = fetch_data(unix_time_millis(
-                        dt.utcnow()-timedelta(weeks=1)), unix_time_millis(dt.utcnow()), interval='1m')
+                    data = fetch_data(
+                        dt.now()-timedelta(weeks=10), dt.now(), interval='1m')
                     self.Generation(data)
                     generation += 1
                     print(f'Generation: {generation}')
@@ -173,8 +183,8 @@ class Agent_controller:
                     raise
 
     def get_best_agents(self, num):
-        exchange = fetch_data(unix_time_millis(dt.utcnow()-timedelta(days=1)),
-                              unix_time_millis(dt.utcnow()), interval='1m')[-1]  # get current price
+        exchange = fetch_data(dt.now()-timedelta(days=1),
+                              dt.now(), interval='1m')[-1]  # get current price
         sorted_agents = sorted(
             self.agents, key=lambda agent: agent.get_score(exchange), reverse=True)
         return sorted_agents[:num]
@@ -221,6 +231,7 @@ class Agent:
         return self.funds + self.crypto*exchange
 
 
-controller = Agent_controller(60, 100, 5.0, 0.1, 1000.0)
-controller.spawn(50, False)
+controller = Agent_controller(60, 100, 5.0, 0.1, 1000.0, 3000)
+controller.load(pickle.load(open('Saved_model.pickle', 'rb'))[0])
+controller.spawn(50)
 controller.Run(0)
