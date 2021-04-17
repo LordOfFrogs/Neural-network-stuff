@@ -1,15 +1,14 @@
 import numpy as np
-
+import warnings
 
 class Activations:
     def Sigmoid(x):
+        warnings.filterwarnings('ignore', 'overflow')
+        warnings.filterwarnings('ignore', '(overflow|invalid)')
         z = 1.
-        try:
-            z =  np.where(x >= 0,
-                            1 / (1 + np.exp(-x)),
-                            np.exp(x) / (1 + np.exp(x)))
-        except:
-            print(x)
+        z =  np.where(x >= 0,
+                        1 / (1 + np.exp(-x)),
+                        np.exp(x) / (1 + np.exp(x)))
         return z
 
     def Sigmoid_der(x):

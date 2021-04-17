@@ -1,11 +1,12 @@
 from datetime import datetime as dt, timedelta
 import time
 import copy
+from tkinter.constants import BOTTOM, LEFT, RIGHT, TOP
 
 import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
-import bitfinex
+import tkinter as tk
 import yfinance as yf
 import pickle
 from Net import RNN
@@ -41,50 +42,13 @@ def Denormalize(x, max, min):
     return x*(max - min)+min
 
 
-def fetch_data(start, stop, symbol='btc-usd', interval='1m'):
-    #region get data with Bitfinex
-    '''# Create api instance
-    api_v2 = bitfinex.bitfinex_v2.api_v2()
+def fetch_data(days, stop, symbol='btc-usd', interval='1m'):
+    df = yf.download(tickers=symbol, interval=interval, stop=stop,
+                     start=stop-timedelta(days=days), progress=True)
+    df = df.reset_index(drop=True)['Close'].to_numpy()
+    df = df[::-1]
 
-    data = []
-    starting = start - step
-    while starting < stop:
-
-        starting = starting + step
-        end = starting + step
-        res = api_v2.candles(symbol=symbol, interval=interval,
-                             limit=tick_limit, start=starting, end=end)
-        data.extend(res)
-        ProgressBar.printProgressBar(
-            starting-start, stop-start, prefix='Downloading data', length=50)
-        time.sleep(1)
-    print()
-    # Remove error messages
-    # print(data)
-    ind = [np.ndim(x) != 0 for x in data]
-    data = [i for (i, v) in zip(data, ind) if v]
-
-    # Create pandas data frame and clean data
-    names = ['time', 'open', 'close', 'high', 'low', 'volume']
-    df = pd.DataFrame(data, columns=names)
-    df.drop_duplicates(inplace=True)
-    df.set_index('time', inplace=True)
-    df.sort_index(inplace=True)
-    df = df.reset_index(drop=True)['close']
-    data = df.to_numpy()'''
-    #endregion
-    data = []
-    diff = stop-start
-    for i in range(diff.days):
-        df = yf.download(tickers=symbol, interval=interval, start=start+timedelta(days=i), end=start+timedelta(days=i)+diff/diff.days, progress=False)
-        df = df[::-1]
-        df = df.reset_index(drop=True)['Close'].to_list()
-        data.extend(df)
-        ProgressBar.printProgressBar(i+1, diff.days, prefix='Downloading data', length=50)
-        
-    data = np.array(data)
-    
-    return data
+    return df
 
 
 class Agent_controller:
@@ -99,7 +63,7 @@ class Agent_controller:
         self.funds = funds
         self.base_a0 = np.random.randn(base_hidden, 1)
         self.training_len = training_len
-        
+
     def load(self, agent):
         self.base_model = agent.model
         self.base_hidden = agent.model.n_hidden
@@ -107,7 +71,16 @@ class Agent_controller:
         self.base_risk = agent.risk
         self.base_a0 = agent.a0
 
+    def save(self):
+        pickle.dump(self.get_best_agents(1), open('Saved_model.pickle', 'wb'))
+    
     def spawn(self, amount, from_base=True):
+        try:
+            amount = int(amount)
+        except ValueError:
+            print('Not int. Try again.')
+            return
+        
         for i in range(amount):
             if from_base:
                 self.agents.append(
@@ -124,7 +97,7 @@ class Agent_controller:
             agent.step(data)
 
     def Generation(self, data):
-        exchange = fetch_data(dt.now()-timedelta(days=1),
+        exchange = fetch_data(2,
                               dt.now(), interval='1m')[-1]
 
         start = np.random.randint(0, data.shape[0]-self.training_len)
@@ -132,7 +105,7 @@ class Agent_controller:
             self.step(copy.copy(data[i:i+self.base_inputs]))
             ProgressBar.printProgressBar(
                 i-start, self.training_len, prefix='Running generation', length=50)
-        
+
         # find best agents
         best_agents = self.get_best_agents(len(self.agents))
         np.random.shuffle(best_agents)
@@ -158,36 +131,45 @@ class Agent_controller:
                         params[i] = pair[1].model.params.values()
                 self.base_model.params = params
                 self.spawn(1)
+        return self.get_best_agents(1)[0].get_score(exchange)
 
     def Run(self, generations):
+        try:
+            generations = int(generations)
+        except ValueError:
+            print('Not int. Try again.')
+            return
+
         if generations != 0:
-            for _ in range(generations):
+            scores = []
+            for generation in range(generations):
                 data = fetch_data(
-                    dt.now()-timedelta(weeks=10), dt.now(), interval='1m')
-                self.Generation(data)
-            return self.get_best_agents(1)[0]
+                    7, dt.now(), interval='1m')
+                scores.append(self.Generation(data))
+                print(f'Generation: {generation}')
+            plt.plot(scores)
+            plt.show()
+            
         else:
             generation = 0
             while True:
                 try:
                     data = fetch_data(
-                        dt.now()-timedelta(weeks=10), dt.now(), interval='1m')
+                        7, dt.now(), interval='1m')
                     self.Generation(data)
                     generation += 1
                     print(f'Generation: {generation}')
-                    pickle.dump(self.get_best_agents(
-                        1), open('Saved_model.pickle', 'wb'))
-                except KeyboardInterrupt:
-                    pickle.dump(self.get_best_agents(
-                        1), open('Saved_model.pickle', 'wb'))
-                    raise
+                except Exception as error:
+                    print(str(error))
+                    pass
 
     def get_best_agents(self, num):
-        exchange = fetch_data(dt.now()-timedelta(days=1),
+        exchange = fetch_data(1,
                               dt.now(), interval='1m')[-1]  # get current price
         sorted_agents = sorted(
             self.agents, key=lambda agent: agent.get_score(exchange), reverse=True)
         return sorted_agents[:num]
+
 
 class Agent:
     def __init__(self, model, funds, risk, a0):
@@ -226,12 +208,80 @@ class Agent:
             self.buy_sell_ratio = self.buys/self.sells
         else:
             self.buy_sell_ratio = 0.
-            
+
     def get_score(self, exchange):
         return self.funds + self.crypto*exchange
 
+    def Test(self):
+        data = fetch_data(7, dt.now())
+        total = []
+        for i in range(len(data)-self.model.n_inputs):
+            self.step(data[i:i+self.model.n_inputs])
+            total.append(self.get_score(data[-1]))
+        plt.plot(total)
+        plt.show()
+
+
+def Load_a():
+    global agent
+    agent = pickle.load(open('Saved_model.pickle', 'rb'))[0]
+
 
 controller = Agent_controller(60, 100, 5.0, 0.1, 1000.0, 3000)
-controller.load(pickle.load(open('Saved_model.pickle', 'rb'))[0])
-controller.spawn(50)
-controller.Run(0)
+#controller.load(pickle.load(open('Saved_model.pickle', 'rb'))[0])
+# controller.spawn(50)
+# controller.Run(20)
+agent = pickle.load(open('Saved_model.pickle', 'rb'))[0]
+window = tk.Tk()
+window.geometry('300x200')
+frame = tk.Frame()
+frame.pack()
+load_c = tk.Button(master=frame, text='Load to controller', command=lambda: controller.load(
+    pickle.load(open('Saved_model.pickle', 'rb'))[0]))
+load_c.pack()
+
+load_a = tk.Button(master=frame, text='Load to agent', command=Load_a)
+load_a.pack()
+
+num_f = tk.Frame(frame)
+num_f.pack()
+
+spawn_l = tk.Label(master=num_f, text='Number of agents')
+spawn_l.pack( side = LEFT)
+
+n_agents = tk.Entry(master=num_f)
+n_agents.pack( side = LEFT)
+
+spawn_f = tk.Frame(frame)
+spawn_f.pack()
+
+from_base = tk.BooleanVar()
+from_base_check = tk.Checkbutton(master=spawn_f, variable=from_base, onvalue=True, offvalue=False, text='From base')
+from_base_check.pack( side = LEFT)
+
+spawn = tk.Button(master=spawn_f, text='Spawn',
+                command = lambda: controller.spawn(n_agents.get(), from_base.get()))
+spawn.pack( side = TOP)
+
+
+run_f = tk.Frame(frame)
+run_f.pack()
+
+generations_l = tk.Label(master=run_f, text='Generations')
+generations_l.pack()
+
+generations = tk.Entry(master=run_f)
+generations.pack()
+
+run = tk.Button(master=run_f, text='Run',
+                command = lambda: controller.Run(generations.get()))
+run.pack()
+
+save = tk.Button(master=frame, text='Save',
+                command = controller.save)
+save.pack()
+
+test = tk.Button(master=frame, text='Test', command = lambda: controller.get_best_agents(1)[0].Test())
+test.pack()
+
+window.mainloop()

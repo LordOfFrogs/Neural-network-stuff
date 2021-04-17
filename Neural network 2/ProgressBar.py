@@ -18,4 +18,4 @@ class ProgressBar:
         print(f'\r{prefix} |{bar}| {percent}% {suffix}', end = printEnd)
         # Print New Line on Complete
         if iteration == total: 
-            print()
+            print('\n')
