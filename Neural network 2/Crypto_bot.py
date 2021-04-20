@@ -4,6 +4,7 @@ import copy
 from tkinter.constants import BOTTOM, LEFT, RIGHT, TOP
 
 import matplotlib.pyplot as plt
+from numpy.random import f
 import pandas as pd
 import numpy as np
 import tkinter as tk
@@ -12,6 +13,7 @@ import pickle
 from Net import RNN
 from ActivationsLosses import Activations
 from ProgressBar import ProgressBar
+import threading
 
 n_RNN_PARAMS = 13
 
@@ -51,6 +53,11 @@ def fetch_data(days, stop, symbol='btc-usd', interval='1m'):
     return df
 
 
+def get_current(symbol='btc-usd'):
+    ticker = yf.Ticker(symbol)
+    return ticker.info['open']
+
+
 class Agent_controller:
     def __init__(self, base_inputs, base_hidden, base_risk, mutation_amount, funds, training_len):
         self.agents = []
@@ -73,14 +80,14 @@ class Agent_controller:
 
     def save(self):
         pickle.dump(self.get_best_agents(1), open('Saved_model.pickle', 'wb'))
-    
+
     def spawn(self, amount, from_base=True):
         try:
             amount = int(amount)
         except ValueError:
             print('Not int. Try again.')
             return
-        
+
         for i in range(amount):
             if from_base:
                 self.agents.append(
@@ -133,7 +140,7 @@ class Agent_controller:
                 self.spawn(1)
         return self.get_best_agents(1)[0].get_score(exchange)
 
-    def Run(self, generations):
+    def Train(self, generations):
         try:
             generations = int(generations)
         except ValueError:
@@ -149,7 +156,7 @@ class Agent_controller:
                 print(f'Generation: {generation}')
             plt.plot(scores)
             plt.show()
-            
+
         else:
             generation = 0
             while True:
@@ -221,6 +228,33 @@ class Agent:
         plt.plot(total)
         plt.show()
 
+    def Run(self, timesteps):
+        prev = 0.0
+        if timesteps == 0:
+            while True:
+                price = get_current()
+                if price != prev:
+                    data = fetch_data(1, dt.now())[-self.model.n_inputs:]
+                    self.step(data)
+                    prev = price
+                    print(f'Total: ${self.get_score(price)}')
+                    print(f'Funds: ${self.funds}')
+                    print(f'Crypto: {self.crypto}')
+        else:
+            timestep = 0
+            prev = 0.0
+            while timestep <= timesteps:
+                price = get_current()
+                if price != prev:
+                    data = fetch_data(1, dt.now())[-self.model.n_inputs:]
+                    self.step(data)
+                    prev = price
+                    timestep += 1
+                    print(f'Total: ${self.get_score(price)}')
+                    print(f'Funds: ${self.funds}')
+                    print(f'Crypto: {self.crypto}')
+                    print(f'Timestep: {timestep}/{timesteps}')
+
 
 def Load_a():
     global agent
@@ -228,60 +262,73 @@ def Load_a():
 
 
 controller = Agent_controller(60, 100, 5.0, 0.1, 1000.0, 3000)
-#controller.load(pickle.load(open('Saved_model.pickle', 'rb'))[0])
-# controller.spawn(50)
-# controller.Run(20)
 agent = pickle.load(open('Saved_model.pickle', 'rb'))[0]
+
+
 window = tk.Tk()
-window.geometry('300x200')
+window.geometry('400x500')
+
 frame = tk.Frame()
 frame.pack()
-load_c = tk.Button(master=frame, text='Load to controller', command=lambda: controller.load(
-    pickle.load(open('Saved_model.pickle', 'rb'))[0]))
-load_c.pack()
 
-load_a = tk.Button(master=frame, text='Load to agent', command=Load_a)
-load_a.pack()
+load = tk.Button(master=frame, text='Load', command=lambda: controller.load(
+    pickle.load(open('Saved_model.pickle', 'rb'))[0]))
+load.pack()
 
 num_f = tk.Frame(frame)
 num_f.pack()
 
 spawn_l = tk.Label(master=num_f, text='Number of agents')
-spawn_l.pack( side = LEFT)
+spawn_l.pack(side=LEFT)
 
 n_agents = tk.Entry(master=num_f)
-n_agents.pack( side = LEFT)
+n_agents.pack(side=LEFT)
 
 spawn_f = tk.Frame(frame)
 spawn_f.pack()
 
 from_base = tk.BooleanVar()
-from_base_check = tk.Checkbutton(master=spawn_f, variable=from_base, onvalue=True, offvalue=False, text='From base')
-from_base_check.pack( side = LEFT)
+from_base_check = tk.Checkbutton(
+    master=spawn_f, variable=from_base, onvalue=True, offvalue=False, text='From base')
+from_base_check.pack(side=LEFT)
 
 spawn = tk.Button(master=spawn_f, text='Spawn',
-                command = lambda: controller.spawn(n_agents.get(), from_base.get()))
-spawn.pack( side = TOP)
+                  command=lambda: controller.spawn(n_agents.get(), from_base.get()))
+spawn.pack(side=TOP)
 
+
+train_f = tk.Frame(frame)
+train_f.pack()
+
+generations_l = tk.Label(master=train_f, text='Generations')
+generations_l.pack()
+
+generations = tk.Entry(master=train_f)
+generations.pack()
+
+train = tk.Button(master=train_f, text='Train',
+                  command=lambda: controller.Train(generations.get()))
+train.pack()
+
+save = tk.Button(master=frame, text='Save',
+                 command=controller.save)
+save.pack()
+
+test = tk.Button(master=frame, text='Test',
+                 command=lambda: controller.get_best_agents(1)[0].Test())
+test.pack()
 
 run_f = tk.Frame(frame)
 run_f.pack()
 
-generations_l = tk.Label(master=run_f, text='Generations')
-generations_l.pack()
+timesteps_l = tk.Label(master=run_f, text='Timesteps')
+timesteps_l.pack()
 
-generations = tk.Entry(master=run_f)
-generations.pack()
+timesteps = tk.Entry(master=run_f)
+timesteps.pack()
 
 run = tk.Button(master=run_f, text='Run',
-                command = lambda: controller.Run(generations.get()))
+                command=lambda: controller.get_best_agents(1)[0].Run(timesteps.get))
 run.pack()
-
-save = tk.Button(master=frame, text='Save',
-                command = controller.save)
-save.pack()
-
-test = tk.Button(master=frame, text='Test', command = lambda: controller.get_best_agents(1)[0].Test())
-test.pack()
 
 window.mainloop()
