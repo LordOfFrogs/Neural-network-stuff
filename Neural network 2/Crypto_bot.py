@@ -1,21 +1,35 @@
-from datetime import datetime as dt, timedelta
-import time
+from datetime import datetime as dt, timedelta, time
 import copy
-from tkinter.constants import BOTTOM, LEFT, RIGHT, TOP
+import os
+import sys
 
 import matplotlib.pyplot as plt
 from numpy.random import f
 import pandas as pd
 import numpy as np
-import tkinter as tk
-import yfinance as yf
+from Historic_Crypto import HistoricalData
+from Historic_Crypto import LiveCryptoData
 import pickle
 from Net import RNN
 from ActivationsLosses import Activations
 from ProgressBar import ProgressBar
-import threading
+import multiprocess as multiprocessing
 
 n_RNN_PARAMS = 13
+
+
+class HiddenPrints:
+    def __enter__(self):
+        self._original_stdout = sys.stdout
+        sys.stdout = open(os.devnull, 'w')
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        sys.stdout.close()
+        sys.stdout = self._original_stdout
+
+
+def dt_to_string(dt):
+    return dt.strftime('%Y-%m-%d-%H-%M')
 
 
 def Classify_gain(current, past):
@@ -44,18 +58,20 @@ def Denormalize(x, max, min):
     return x*(max - min)+min
 
 
-def fetch_data(days, stop, symbol='btc-usd', interval='1m'):
-    df = yf.download(tickers=symbol, interval=interval, stop=stop,
-                     start=stop-timedelta(days=days), progress=True)
-    df = df.reset_index(drop=True)['Close'].to_numpy()
-    df = df[::-1]
+def fetch_data(period, stop, symbol='LTC-USD', interval=60):
+    with HiddenPrints():
+        data = HistoricalData(symbol, 60, dt_to_string(
+            stop-period), dt_to_string(stop), False).retrieve_data()
+    data = data['close'].to_numpy()
 
-    return df
+    return data
 
 
-def get_current(symbol='btc-usd'):
-    ticker = yf.Ticker(symbol)
-    return ticker.info['open']
+def get_current(symbol='LTC-USD'):
+    with HiddenPrints():
+        data = HistoricalData(symbol, 60, dt_to_string(
+            dt.utcnow()-timedelta(minutes=1)), verbose=False).retrieve_data()['close'][0]
+    return data
 
 
 class Agent_controller:
@@ -78,8 +94,9 @@ class Agent_controller:
         self.base_risk = agent.risk
         self.base_a0 = agent.a0
 
-    def save(self):
-        pickle.dump(self.get_best_agents(1), open('Saved_model.pickle', 'wb'))
+    def save(self, length):
+        best_agent = self.Test(length)
+        pickle.dump(best_agent, open('Saved_model.pickle', 'wb'))
 
     def spawn(self, amount, from_base=True):
         try:
@@ -104,8 +121,7 @@ class Agent_controller:
             agent.step(data)
 
     def Generation(self, data):
-        exchange = fetch_data(2,
-                              dt.now(), interval='1m')[-1]
+        exchange = get_current()
 
         start = np.random.randint(0, data.shape[0]-self.training_len)
         for i in range(start, start+self.training_len):
@@ -119,9 +135,9 @@ class Agent_controller:
         pairs = []
         for i in range(int(len(best_agents)/2)):
             pairs.append((best_agents[i], best_agents[i+1]))
-
+        best_score = self.get_best_agents(1)[0].get_score(exchange)
         print(
-            f'Best Score: {self.get_best_agents(1)[0].get_score(exchange)}')
+            f'\nBest Score: {best_score}')
         self.agents.clear()
         # create new generation
         for pair in pairs:
@@ -138,22 +154,16 @@ class Agent_controller:
                         params[i] = pair[1].model.params.values()
                 self.base_model.params = params
                 self.spawn(1)
-        return self.get_best_agents(1)[0].get_score(exchange)
+        return best_score
 
     def Train(self, generations):
-        try:
-            generations = int(generations)
-        except ValueError:
-            print('Not int. Try again.')
-            return
+        training_data = pd.read_csv('ltcusd.csv')['close'].to_numpy()
 
         if generations != 0:
             scores = []
             for generation in range(generations):
-                data = fetch_data(
-                    7, dt.now(), interval='1m')
-                scores.append(self.Generation(data))
-                print(f'Generation: {generation}')
+                scores.append(self.Generation(training_data))
+                print(f'Generation: {generation+1}')
             plt.plot(scores)
             plt.show()
 
@@ -161,9 +171,7 @@ class Agent_controller:
             generation = 0
             while True:
                 try:
-                    data = fetch_data(
-                        7, dt.now(), interval='1m')
-                    self.Generation(data)
+                    self.Generation(training_data)
                     generation += 1
                     print(f'Generation: {generation}')
                 except Exception as error:
@@ -171,11 +179,33 @@ class Agent_controller:
                     pass
 
     def get_best_agents(self, num):
-        exchange = fetch_data(1,
-                              dt.now(), interval='1m')[-1]  # get current price
+        exchange = get_current()  # get current price
         sorted_agents = sorted(
             self.agents, key=lambda agent: agent.get_score(exchange), reverse=True)
         return sorted_agents[:num]
+
+    def Test(self, length, max_days_ago=600, num_agents=1):
+        scores = []
+        current = get_current()
+        for _ in range(len(self.agents)):
+            scores.append(0)
+        for i in range(length):
+            daysAgo = np.random.randint(0, max_days_ago)
+            for agent in range(len(self.agents)):
+                with HiddenPrints():
+                    self.agents[agent].Test(
+                        1, dt.utcnow()-timedelta(days=daysAgo), False)
+
+                scores[agent] += self.agents[agent].get_score(current)
+                ProgressBar.printProgressBar(
+                    i*len(self.agents)+agent+1, length*len(self.agents), prefix='Testing', length=50)
+        if num_agents == 1:
+            best_agent = self.agents[scores.index(max(scores))]
+            return best_agent
+        else:
+            best_agents = sorted(
+                self.agents, key=lambda agent: scores[self.agents.index(agent)], reverse=True)
+            return best_agents[:num_agents]
 
 
 class Agent:
@@ -219,34 +249,49 @@ class Agent:
     def get_score(self, exchange):
         return self.funds + self.crypto*exchange
 
-    def Test(self):
-        data = fetch_data(7, dt.now())
-        total = []
+    def Test(self, days, stop, progress=True):
+        data = fetch_data(timedelta(days=days), stop)
+        current = get_current()
+        total_current = []
+        total_past = []
         for i in range(len(data)-self.model.n_inputs):
             self.step(data[i:i+self.model.n_inputs])
-            total.append(self.get_score(data[-1]))
-        plt.plot(total)
-        plt.show()
+            # total_current.append(self.get_score(current))
+            # total_past.append(self.get_score(data[i+self.model.n_inputs]))
+            if progress:
+                ProgressBar.printProgressBar(
+                    i+1, len(data)-self.model.n_inputs, prefix=f'Testing: {i+1}/{len(data)-self.model.n_inputs}', length=50)
+        print(f'Final score: {self.get_score(current)}')
+        # plt.plot(total_current)
+        # plt.plot(total_past)
+        # plt.show()
 
     def Run(self, timesteps):
         prev = 0.0
         if timesteps == 0:
+            timestep = 0
             while True:
                 price = get_current()
                 if price != prev:
-                    data = fetch_data(1, dt.now())[-self.model.n_inputs:]
+                    timestep += 1
+                    data = fetch_data(timedelta(hours=1),
+                                      dt.utcnow())[-self.model.n_inputs:]
                     self.step(data)
                     prev = price
                     print(f'Total: ${self.get_score(price)}')
                     print(f'Funds: ${self.funds}')
                     print(f'Crypto: {self.crypto}')
+                    print(f'Timesteps: {timestep}')
+                # else:
+                #    print(f'No new data: {price} {prev}')
         else:
             timestep = 0
             prev = 0.0
             while timestep <= timesteps:
                 price = get_current()
                 if price != prev:
-                    data = fetch_data(1, dt.now())[-self.model.n_inputs:]
+                    data = fetch_data(timedelta(hours=1),
+                                      dt.utcnow())[-self.model.n_inputs:]
                     self.step(data)
                     prev = price
                     timestep += 1
@@ -254,81 +299,104 @@ class Agent:
                     print(f'Funds: ${self.funds}')
                     print(f'Crypto: {self.crypto}')
                     print(f'Timestep: {timestep}/{timesteps}')
+                # else:
+                #    print(f'No new data: {price} {prev}')
 
 
-def Load_a():
-    global agent
-    agent = pickle.load(open('Saved_model.pickle', 'rb'))[0]
+if __name__ == '__main__':
+    controller = Agent_controller(60, 100, 5.0, 0.1, 1000.0, 1440)
+    agent = pickle.load(open('Saved_model.pickle', 'rb'))
 
+    train_th = multiprocessing.Process(target=controller.Train)
+    run_th = multiprocessing.Process(target=agent.Run)
 
-controller = Agent_controller(60, 100, 5.0, 0.1, 1000.0, 3000)
-agent = pickle.load(open('Saved_model.pickle', 'rb'))[0]
+    def Get_input():
+        command = input('Enter Command: ')
+        command = command.split()
+        global controller
+        global agent
+        global train_th
+        global run_th
 
+        if command[0] == 'load':
+            if command[1] == 'controller':
+                controller.load(pickle.load(
+                    open('Saved_model.pickle', 'rb')))
+            elif command[1] == 'agent':
+                agent = pickle.load(open('Saved_model.pickle', 'rb'))
+            return
+        if command[0] == 'save':
+            try:
+                len = int(command[1])
+                controller.save(len)
+                return
+            except:
+                pass
+        if command[0] == 'spawn':
+            try:
+                num = int(command[1])
+                from_base = True
+                if command[2] == 't':
+                    from_base = True
+                elif command[2] == 'f':
+                    from_base = False
+                else:
+                    raise Exception('Boolean value was not entered correctly')
+                controller.spawn(num, from_base)
+                return
+            except:
+                pass
+        if command[0] == 'train':
+            try:
+                generations = int(command[1])
+                train_th = multiprocessing.Process(
+                    target=controller.Train, args=(generations,))
+                train_th.start()
+                return
+            except:
+                pass
+        if command[0] == 'run':
+            try:
+                timesteps = int(command[1])
+                run_th = multiprocessing.Process(
+                    target=agent.Run, args=(timesteps,))
+                run_th.start()
+                return
+            except:
+                pass
 
-window = tk.Tk()
-window.geometry('400x500')
+        if command[0] == 'test':
+            try:
+                days = int(command[1])
+                agent.Test(days, dt.utcnow())
+                return
+            except:
+                pass
 
-frame = tk.Frame()
-frame.pack()
+        if command[0] == 'reset':
+            if command[1] == 'agent':
+                agent.funds = controller.funds
+                agent.crypto = 0
+                agent.buys = 0
+                agent.sells = 0
+                agent.buy_sell_ratio = 1.
+                return
+            elif command[1] == 'controller':
+                controller.agents.clear()
+                return
 
-load = tk.Button(master=frame, text='Load', command=lambda: controller.load(
-    pickle.load(open('Saved_model.pickle', 'rb'))[0]))
-load.pack()
+        if command[0] == 'stop':
+            if command[1] == 'training':
+                train_th.terminate()
+                return
+            elif command[1] == 'running':
+                run_th.terminate()
+                return
 
-num_f = tk.Frame(frame)
-num_f.pack()
+        if command[0] == 'exit':
+            exit()
 
-spawn_l = tk.Label(master=num_f, text='Number of agents')
-spawn_l.pack(side=LEFT)
+        print(f'Error when processing input: {command}')
 
-n_agents = tk.Entry(master=num_f)
-n_agents.pack(side=LEFT)
-
-spawn_f = tk.Frame(frame)
-spawn_f.pack()
-
-from_base = tk.BooleanVar()
-from_base_check = tk.Checkbutton(
-    master=spawn_f, variable=from_base, onvalue=True, offvalue=False, text='From base')
-from_base_check.pack(side=LEFT)
-
-spawn = tk.Button(master=spawn_f, text='Spawn',
-                  command=lambda: controller.spawn(n_agents.get(), from_base.get()))
-spawn.pack(side=TOP)
-
-
-train_f = tk.Frame(frame)
-train_f.pack()
-
-generations_l = tk.Label(master=train_f, text='Generations')
-generations_l.pack()
-
-generations = tk.Entry(master=train_f)
-generations.pack()
-
-train = tk.Button(master=train_f, text='Train',
-                  command=lambda: controller.Train(generations.get()))
-train.pack()
-
-save = tk.Button(master=frame, text='Save',
-                 command=controller.save)
-save.pack()
-
-test = tk.Button(master=frame, text='Test',
-                 command=lambda: controller.get_best_agents(1)[0].Test())
-test.pack()
-
-run_f = tk.Frame(frame)
-run_f.pack()
-
-timesteps_l = tk.Label(master=run_f, text='Timesteps')
-timesteps_l.pack()
-
-timesteps = tk.Entry(master=run_f)
-timesteps.pack()
-
-run = tk.Button(master=run_f, text='Run',
-                command=lambda: controller.get_best_agents(1)[0].Run(timesteps.get))
-run.pack()
-
-window.mainloop()
+    while True:
+        Get_input()
